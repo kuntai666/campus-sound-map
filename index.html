@@ -401,6 +401,7 @@
 </footer>
 
 <div id="toast"></div>
+<div id="dbg" style="position:fixed;left:8px;bottom:8px;z-index:999;font:11px/1.5 ui-monospace,monospace;color:#9fe8b5;background:rgba(0,0,0,.72);padding:8px 10px;border-radius:8px;display:none;white-space:pre;pointer-events:none"></div>
 
 <div id="clouds">
   <div class="puff p3" style="width:60vw;height:34vh;left:-12vw;top:-6vh;animation-duration:11s"></div>
@@ -522,7 +523,11 @@ function heightGain(){
     n.cur = n.cur + (t - n.cur)*.05;   // 更缓的淡入淡出，杜绝突跳
     n.cur = Math.max(0, Math.min(1, n.cur));
     if(n.gain){
-      n.gain.gain.setTargetAtTime(n.cur, actx.currentTime, .04);  // 增益节点平滑过渡
+      // 只在音量确有变化时写一次，避免每帧往时间线塞自动化事件（安卓长时间会堆积/卡顿）
+      if(Math.abs(n.cur - (n.written ?? -1)) > .004){
+        n.written = n.cur;
+        n.gain.gain.setTargetAtTime(n.cur, actx.currentTime, .035);
+      }
     } else if(audioOn){
       if(n.cur > .02){ if(n.el.paused) n.el.play().catch(()=>{}); }
       else if(n.cur < .005 && !n.el.paused) n.el.pause();          // 无 WebAudio 时的退化路径
@@ -534,7 +539,7 @@ function muteAll(){
   for(const id in nodes){
     setGain(id, 0);
     const n = nodes[id];
-    if(n.gain) n.gain.gain.setTargetAtTime(0, actx.currentTime, .03);  // 立即静音（转场/标题态）
+    if(n.gain && n.written !== 0){ n.written = 0; n.gain.gain.setTargetAtTime(0, actx.currentTime, .03); }
     n.cur = 0;
   }
 }
@@ -906,6 +911,25 @@ addEventListener('wheel', e=>{
 /* 初始渲染（标题态，地图在云层后待命） */
 if(!isMobile) document.getElementById('gestHint').textContent = '滚轮放大 · 进入地图';
 applyTransform();
+
+/* ---------- 诊断面板：地址后加 ?debug 打开（不显示时完全无影响） ---------- */
+if(location.search.indexOf('debug') > -1){
+  const dbg = document.getElementById('dbg');
+  dbg.style.display = 'block';
+  setInterval(()=>{
+    const vol = Object.entries(nodes).map(([k,n])=>{
+      const g = n.gain ? n.gain.gain.value.toFixed(2) : '--';
+      return k.slice(0,5) + ':' + g;
+    }).join(' ');
+    const [sp, sd] = nearestSpotTo(innerWidth/2, innerHeight/2, spots);
+    dbg.textContent =
+      'actx ' + (actx ? actx.state : 'null') + '  on:' + (audioOn?1:0) + '  ' + mode +
+      '\nzoom ' + zoom.toFixed(2) + '  hg ' + heightGain().toFixed(2) +
+      '\nnear ' + (sp ? sp.dataset.id : '-') + ' d/R ' + (centerRadius() ? (sd/centerRadius()).toFixed(2) : '-') +
+      '\n' + vol +
+      '\npaused ' + Object.values(nodes).map(n=>n.el.paused?1:0).join('');
+  }, 250);
+}
 </script>
 </body>
 </html>

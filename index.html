@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>北邮沙河 · 声音地图</title>
+<style>
+  :root{
+    --ink:#0B1F3A;      /* Ink 墨蓝 */
+    --navy:#173E6B;     /* Navy 海军蓝 */
+    --oxford:#2D5F8A;   /* Oxford 牛津蓝 */
+    --sky:#4D94C4;      /* Sky 天蓝 */
+    --cloud:#B8D9EE;    /* Cloud 云蓝 */
+    --gold:#e8c98a;     /* 点缀暖金 */
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{touch-action:none;overscroll-behavior:none}
+  html,body{height:100%}
+  body{
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    background:
+      radial-gradient(1000px 600px at 20% -10%, #12294a 0%, transparent 55%),
+      radial-gradient(900px 600px at 95% 110%, #0e2440 0%, transparent 60%),
+      var(--ink);
+    color:var(--cloud);
+    overflow:hidden;
+  }
+  canvas#sky{position:fixed;inset:0;z-index:1;pointer-events:none}
+
+  header{
+    position:fixed;top:0;left:0;right:0;z-index:30;
+    display:flex;align-items:baseline;gap:18px;
+    padding:26px 40px 0;pointer-events:none;
+  }
+  header h1{font-size:22px;font-weight:600;letter-spacing:.3em;color:#fff}
+  header .motto{font-size:13px;letter-spacing:.4em;color:var(--cloud);border-left:1px solid rgba(184,217,238,.3);padding-left:18px}
+  header .hint{margin-left:auto;font-size:12px;color:var(--cloud);opacity:.85;letter-spacing:.15em}
+
+  #gate{
+    position:fixed;inset:0;z-index:50;
+    background:radial-gradient(800px 500px at 50% 30%, rgba(20,48,79,.92) 0%, rgba(10,26,48,.96) 75%);
+    backdrop-filter:blur(2px);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;
+    transition:opacity .9s ease, visibility .9s;
+  }
+  #gate.hide{opacity:0;visibility:hidden}
+  #gate.fading > *:not(.credit){opacity:0;transition:opacity .8s ease}
+  #gate > *{transition:opacity .8s ease}
+  #gate h2{font-size:30px;font-weight:300;letter-spacing:.55em;text-indent:.55em;color:#fff}
+  #gate p{font-size:13px;color:var(--cloud);letter-spacing:.35em}
+  #enter{
+    margin-top:10px;padding:14px 52px;border:1px solid rgba(77,148,196,.7);
+    background:rgba(45,95,138,.25);color:var(--cloud);font-size:14px;letter-spacing:.4em;text-indent:.4em;
+    cursor:pointer;transition:.35s;border-radius:999px;backdrop-filter:blur(6px);
+  }
+  #enter:hover{background:var(--sky);color:#fff;box-shadow:0 8px 30px rgba(77,148,196,.45)}
+  #gate .gest{margin-top:-6px;font-size:11px;color:#6d89a8;letter-spacing:.35em}
+  #gate .credit{position:absolute;bottom:24px;font-size:10px;color:#54708f;letter-spacing:.05em;max-width:84%;text-align:center;line-height:1.8}
+
+  #stage{position:fixed;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  #stage svg{width:min(94vw,1150px);height:auto;max-height:88vh;display:block;transition:transform .06s linear;will-change:transform;cursor:grab}
+
+  /* 虚化椭圆视野：边缘磨砂虚化，中央清晰；尺寸固定不随缩放变化 */
+  #vignette{
+    position:fixed;inset:0;z-index:10;pointer-events:none;
+    background:radial-gradient(ellipse 64% 62% at 50% 50%, transparent 55%, rgba(11,31,58,.88) 100%);
+    -webkit-mask:radial-gradient(ellipse 64% 62% at 50% 50%, transparent 55%, #000 82%);
+    mask:radial-gradient(ellipse 64% 62% at 50% 50%, transparent 55%, #000 82%);
+    backdrop-filter:blur(5px);
+    -webkit-backdrop-filter:blur(5px);
+  }
+
+  /* ---- 地图样式 ---- */
+  .water{animation:shimmer 6s ease-in-out infinite}
+  @keyframes shimmer{0%,100%{opacity:.4}50%{opacity:.85}}
+  .road{stroke:#22486f;stroke-linecap:round}
+  .roadline{stroke:#8fb6d8;stroke-dasharray:10 14;opacity:.55}
+  .bldg-label{fill:#9fbfe0;font-size:calc(12px / var(--z,1));letter-spacing:calc(3px / var(--z,1));text-anchor:middle}
+  .bldg-label.sm{font-size:calc(10px / var(--z,1));fill:#6d8fb4}
+
+  .spot{cursor:pointer}
+  .spot .halo{transform-origin:center;transform-box:fill-box;animation:breath 3.6s ease-in-out infinite}
+  .spot:hover .halo,.spot.active .halo{animation-duration:1.3s}
+  @keyframes breath{0%,100%{opacity:.15;transform:scale(1)}50%{opacity:.6;transform:scale(1.3)}}
+  .spot .ring{fill:none;stroke-width:1.4;opacity:.7}
+  .spot .label{fill:#e6f2fc;font-size:calc(14px / var(--z,1));font-weight:600;letter-spacing:calc(2px / var(--z,1));paint-order:stroke;stroke:rgba(11,31,58,.85);stroke-width:calc(4px / var(--z,1));text-anchor:middle}
+  .spot .sub{fill:#8fb6d8;font-size:calc(10px / var(--z,1));letter-spacing:calc(1px / var(--z,1));paint-order:stroke;stroke:rgba(11,31,58,.8);stroke-width:calc(3px / var(--z,1));text-anchor:middle}
+  .spot .eq{opacity:0}
+  .spot.playing .eq{opacity:1}
+
+  /* ---- 信息卡 ---- */
+  #card{
+    position:fixed;z-index:30;width:280px;
+    right:4vw;top:50%;transform:translateY(-50%) translateX(28px) scale(var(--cs,1));
+    background:rgba(15,33,58,.92);backdrop-filter:blur(16px);
+    border:1px solid rgba(119,163,205,.35);border-radius:14px;
+    padding:20px 22px 17px;opacity:0;visibility:hidden;
+    transition:.5s cubic-bezier(.2,.8,.2,1);
+    box-shadow:0 24px 70px rgba(2,10,24,.6);
+  }
+  #card.left{right:auto;left:4vw;transform:translateY(-50%) translateX(-28px) scale(var(--cs,1))}
+  #card.show{opacity:1;visibility:visible;transform:translateY(-50%) translateX(28px) scale(var(--cs,1))}
+  #card.left.show{transform:translateY(-50%) translateX(-28px) scale(var(--cs,1))}
+  #card .tag{font-size:9px;letter-spacing:.35em;color:var(--sky);margin-bottom:8px;font-weight:600}
+  #card h3{font-size:17px;font-weight:700;letter-spacing:.1em;color:#fff;margin-bottom:3px}
+  #card .en{font-size:10px;color:#7d9fbd;letter-spacing:.18em;margin-bottom:11px}
+  #card p{font-size:12px;line-height:1.85;color:#c3d9ec;margin-bottom:12px}
+  #card .bar{height:3px;background:#1c3a5e;border-radius:3px;overflow:hidden;margin-bottom:8px}
+  #card .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--sky),var(--cloud));transition:width .15s}
+  #card .vol{display:flex;justify-content:space-between;font-size:10px;color:#7d9fbd;letter-spacing:.1em}
+  #card .close{position:absolute;top:12px;right:14px;background:none;border:none;color:#6d8fb4;font-size:16px;cursor:pointer}
+  #card .close:hover{color:#fff}
+
+  footer{position:fixed;bottom:0;left:0;right:0;z-index:30;display:flex;align-items:center;padding:0 40px 20px;pointer-events:none}
+  #status{font-size:11px;color:var(--cloud);opacity:.85;letter-spacing:.22em}
+  footer .license{margin-left:auto;font-size:10px;color:#4d6a8a;letter-spacing:.04em}
+
+  /* ---- toast ---- */
+  #toast{
+    position:fixed;z-index:40;left:50%;top:86px;transform:translateX(-50%) translateY(-8px);
+    background:rgba(20,44,74,.92);color:#c3d9ec;backdrop-filter:blur(10px);
+    border:1px solid rgba(119,163,205,.4);border-radius:999px;padding:10px 22px;
+    font-size:12px;letter-spacing:.12em;box-shadow:0 10px 34px rgba(2,10,24,.5);
+    opacity:0;visibility:hidden;transition:.45s;pointer-events:none;white-space:nowrap;
+  }
+  #toast.show{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0)}
+  #toast b{color:var(--sky);font-weight:600}
+
+  .poi{cursor:default}
+  .poi circle.core{fill:#16304f;stroke:#5d84ab;stroke-width:2}
+  .poi .wave{fill:none;stroke:#5d84ab;stroke-width:1.2;opacity:0;transform-origin:center;transform-box:fill-box}
+  .poi.near .wave{animation:wave 1.6s ease-out infinite;opacity:.7}
+  .poi.near .wave:nth-of-type(2){animation-delay:.55s}
+  @keyframes wave{0%{r:6;opacity:.7}100%{r:26;opacity:0}}
+  .poi text{fill:#7d9fbd;font-size:calc(10px / var(--z,1));letter-spacing:calc(1px / var(--z,1));text-anchor:middle;paint-order:stroke;stroke:rgba(11,31,58,.8);stroke-width:3px}
+
+  /* ---- 云层 ---- */
+  #clouds{
+    position:fixed;inset:0;z-index:46;pointer-events:none;
+    opacity:0;
+  }
+  #clouds{background:linear-gradient(180deg,rgba(196,222,242,.9) 0%,rgba(168,199,226,.92) 100%)}
+  #clouds .puff{
+    position:absolute;border-radius:50%;
+    will-change:transform;
+    background:radial-gradient(closest-side, #ffffff 0%, #e8f2fb 50%, rgba(232,242,251,0) 100%);
+    filter:blur(7px);
+    animation:drift ease-in-out infinite alternate;
+  }
+  #clouds .puff.p2{background:radial-gradient(closest-side, #f4faff 0%, #d8e9f7 50%, rgba(216,233,247,0) 100%);filter:blur(16px)}
+  #clouds .puff.p3{background:radial-gradient(closest-side, #ffffff 0%, #cfe2f2 55%, rgba(207,226,242,0) 100%);filter:blur(24px)}
+  @keyframes drift{0%{transform:translateX(-3vw) translateY(0)}50%{transform:translateX(1.5vw) translateY(-1.6vh)}100%{transform:translateX(3vw) translateY(0)}}
+
+  /* ---- 横屏提示 ---- */
+  #rotate{
+    position:fixed;inset:0;z-index:60;background:#0a1a30;display:none;
+    flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center;
+  }
+  #rotate.show{display:flex}
+  #rotate .phone{width:52px;height:88px;border:3px solid var(--sky);border-radius:10px;animation:rot 2s ease-in-out infinite}
+  @keyframes rot{0%,20%{transform:rotate(0)}60%,100%{transform:rotate(90deg)}}
+  #rotate p{color:var(--cloud);letter-spacing:.3em;font-size:14px}
+  #rotate span{color:#54708f;font-size:11px;letter-spacing:.15em}
+
+  @media (max-width:760px){
+    header{padding:16px 18px 0;flex-wrap:wrap;gap:10px}
+    header h1{font-size:16px}
+    header .motto{font-size:10px;padding-left:10px}
+    header .hint{display:none}
+    #stage svg{width:100vw;max-height:74vh}
+    .spot .label{font-size:16px}
+    #card{left:50%;right:auto;top:auto;bottom:calc(48px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(24px) scale(var(--cs,1));width:min(94vw,360px);padding:20px 22px 16px}
+    #card.show{transform:translateX(-50%) translateY(0) scale(var(--cs,1))}
+    #card p{line-height:1.9;margin-bottom:12px}
+    footer{padding:0 18px calc(12px + env(safe-area-inset-bottom))}
+    footer .license{display:none}
+    #status{font-size:10px}
+  }
+</style>
+</head>
+<body>
+
+<canvas id="sky"></canvas>
+
+<header>
+  <h1>北邮沙河 · 声音地图</h1>
+  <div class="motto">厚德博学 · 敬业乐群</div>
+  <div class="hint" id="hint">移动到声点附近 声音渐强 · 点击查看详情</div>
+</header>
+
+<div id="gate">
+  <h2>校园声音地图</h2>
+  <p>北京邮电大学 · 沙河校区</p>
+  <p class="gest" id="gestHint">双指张开 · 滑入地图</p>
+  <div class="credit">演示版 · 环境音来自开源 CC0 素材（Noisekun / Freesound SFX Producer 等），正式版将替换为校园实地录音<br>建议佩戴耳机以获得更佳的空间音频体验</div>
+</div>
+
+<div id="stage">
+<svg viewBox="0 0 1200 780" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="lakeG" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2d6da8"/><stop offset="55%" stop-color="#1e5588"/><stop offset="100%" stop-color="#173e6b"/>
+    </linearGradient>
+    <linearGradient id="bA" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#26517c"/><stop offset="100%" stop-color="#1a3a5e"/>
+    </linearGradient>
+    <linearGradient id="bB" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1f4468"/><stop offset="100%" stop-color="#15304f"/>
+    </linearGradient>
+    <linearGradient id="field" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#173a52"/><stop offset="100%" stop-color="#123048"/>
+    </linearGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity=".35"/>
+    </filter>
+    <filter id="glow" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="3.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect x="60" y="60" width="1080" height="650" rx="46" fill="#102947" stroke="#22486f" stroke-width="2" filter="url(#sh)"/>
+
+  <path class="road" d="M80 470 H1120" stroke-width="26" fill="none"/>
+  <path class="roadline" d="M80 470 H1120" stroke-width="2" fill="none"/>
+  <path class="road" d="M330 80 V700" stroke-width="22" fill="none"/>
+  <path class="roadline" d="M330 80 V700" stroke-width="2" fill="none"/>
+  <text class="bldg-label sm" x="150" y="460">鸿 雁 路</text>
+  <text class="bldg-label sm" x="392" y="110">国脉西路</text>
+
+  <g>
+    <path d="M820 520 q60 -46 150 -30 q90 14 100 78 q8 60 -60 92 q-76 34 -150 6 q-70 -26 -74 -76 q-3 -44 34 -70 z" fill="url(#lakeG)" filter="url(#sh)"/>
+    <path class="water" d="M850 560 q50 -12 100 0 t90 -6" stroke="#7db8dd" stroke-width="2.2" fill="none"/>
+    <path class="water" d="M870 600 q55 -10 110 4" stroke="#7db8dd" stroke-width="1.6" fill="none" style="animation-delay:1.2s"/>
+    <text class="bldg-label" x="930" y="580" style="fill:#9cc8e8">景 观 湖</text>
+  </g>
+
+  <g>
+    <rect x="95" y="510" width="200" height="120" rx="58" fill="url(#field)" filter="url(#sh)"/>
+    <rect x="112" y="526" width="166" height="88" rx="44" fill="none" stroke="#b0584f" stroke-width="4"/>
+    <rect x="152" y="548" width="86" height="44" rx="4" fill="#1d4a3c" opacity=".95"/>
+    <line x1="195" y1="548" x2="195" y2="592" stroke="#3d6e5c" stroke-width="1.6"/>
+    <text class="bldg-label" x="195" y="650">运 动 场</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="470" y="200" width="190" height="120" rx="6" fill="url(#bA)" stroke="#3d6a96" stroke-width="1.5"/>
+    <circle cx="565" cy="200" r="62" fill="url(#bB)" stroke="#3d6a96" stroke-width="1.5"/>
+    <rect x="530" y="238" width="70" height="82" fill="#4d94c4" opacity=".35"/>
+    <g stroke="#4d7ba8" stroke-width="1.2">
+      <line x1="495" y1="225" x2="540" y2="225"/><line x1="495" y1="245" x2="540" y2="245"/>
+      <line x1="590" y1="225" x2="635" y2="225"/><line x1="590" y1="245" x2="635" y2="245"/>
+      <line x1="495" y1="265" x2="540" y2="265"/><line x1="590" y1="265" x2="635" y2="265"/>
+      <line x1="495" y1="285" x2="540" y2="285"/><line x1="590" y1="285" x2="635" y2="285"/>
+    </g>
+    <text class="bldg-label" x="565" y="345" style="font-size:13px">图 书 馆</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="430" y="105" width="110" height="66" rx="5" fill="url(#bB)" stroke="#3d6a96"/>
+    <rect x="560" y="105" width="100" height="66" rx="5" fill="url(#bB)" stroke="#3d6a96"/>
+    <rect x="680" y="105" width="120" height="66" rx="5" fill="url(#bB)" stroke="#3d6a96"/>
+    <rect x="540" y="118" width="20" height="40" fill="#e8c98a" opacity=".5"/>
+    <rect x="660" y="118" width="20" height="40" fill="#4d94c4" opacity=".4"/>
+    <rect x="790" y="118" width="20" height="40" fill="#e8c98a" opacity=".35"/>
+    <text class="bldg-label sm" x="485" y="95">学生活动中心</text>
+    <text class="bldg-label sm" x="610" y="95">综合办公楼</text>
+    <text class="bldg-label sm" x="740" y="95">风味/教工餐厅</text>
+    <circle cx="630" cy="188" r="17" fill="#16304f" stroke="#3d6a96" stroke-width="1.5"/>
+    <g fill="#5d84ab"><rect x="622" y="180" width="7" height="7"/><rect x="636" y="180" width="4" height="4"/><rect x="629" y="189" width="4" height="4"/><rect x="636" y="193" width="7" height="7"/></g>
+    <text class="bldg-label sm" x="630" y="222">二维码广场</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="680" y="255" width="150" height="88" rx="5" fill="url(#bA)" stroke="#3d6a96" stroke-width="1.5"/>
+    <g fill="#4d94c4" opacity=".45">
+      <rect x="700" y="275" width="26" height="16"/><rect x="742" y="275" width="26" height="16"/>
+      <rect x="784" y="275" width="26" height="16"/>
+      <rect x="700" y="303" width="26" height="16"/><rect x="742" y="303" width="26" height="16"/>
+      <rect x="784" y="303" width="26" height="16"/>
+    </g>
+    <text class="bldg-label sm" x="755" y="360">教学实验综合楼</text>
+    <rect x="480" y="365" width="140" height="70" rx="5" fill="url(#bB)" stroke="#3d6a96"/>
+    <g fill="#4d94c4" opacity=".4">
+      <rect x="498" y="382" width="22" height="14"/><rect x="538" y="382" width="22" height="14"/><rect x="578" y="382" width="22" height="14"/>
+      <rect x="498" y="404" width="22" height="14"/><rect x="538" y="404" width="22" height="14"/><rect x="578" y="404" width="22" height="14"/>
+    </g>
+    <text class="bldg-label sm" x="550" y="452">公共教学楼</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="380" y="530" width="64" height="44" rx="4" fill="url(#bB)" stroke="#3d6a96"/>
+    <rect x="462" y="530" width="64" height="44" rx="4" fill="url(#bB)" stroke="#3d6a96"/>
+    <rect x="544" y="530" width="64" height="44" rx="4" fill="url(#bB)" stroke="#3d6a96"/>
+    <text class="bldg-label sm" x="494" y="596">雁 南 园</text>
+  </g>
+  <g filter="url(#sh)">
+    <rect x="120" y="120" width="66" height="46" rx="4" fill="url(#bB)" stroke="#3d6a96"/>
+    <rect x="206" y="120" width="66" height="46" rx="4" fill="url(#bB)" stroke="#3d6a96"/>
+    <text class="bldg-label sm" x="196" y="188">雁 北 园</text>
+  </g>
+
+  <g>
+    <line x1="905" y1="440" x2="905" y2="408" stroke="#5d84ab" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="905" cy="402" r="9" fill="#16304f" stroke="#4d94c4" stroke-width="2.5"/>
+    <text class="bldg-label sm" x="940" y="412">甲子钟</text>
+  </g>
+
+  <g fill="#5d84ab" font-size="11" letter-spacing="2">
+    <rect x="106" y="458" width="4" height="24" fill="#3d6a96"/><rect x="122" y="458" width="4" height="24" fill="#3d6a96"/>
+    <text x="86" y="440">西 门</text>
+    <rect x="700" y="668" width="4" height="24" fill="#3d6a96"/><rect x="716" y="668" width="4" height="24" fill="#3d6a96"/>
+    <text x="672" y="712">南 门</text>
+  </g>
+
+  <g fill="#1d4a52">
+    <circle cx="700" cy="200" r="9"/><circle cx="716" cy="212" r="6"/>
+    <circle cx="660" cy="300" r="8"/><circle cx="648" cy="312" r="5"/>
+    <circle cx="660" cy="430" r="9"/><circle cx="676" cy="442" r="6"/>
+    <circle cx="860" cy="470" r="8"/><circle cx="876" cy="480" r="5"/>
+    <circle cx="330" cy="330" r="8"/><circle cx="316" cy="342" r="5"/>
+    <circle cx="760" cy="490" r="8"/><circle cx="746" cy="500" r="5"/>
+    <circle cx="330" cy="560" r="9"/><circle cx="346" cy="572" r="6"/>
+    <circle cx="700" cy="640" r="8"/><circle cx="714" cy="650" r="5"/>
+  </g>
+
+  <g class="poi" data-poi="二维码广场" transform="translate(630,192)">
+    <circle class="wave" r="6"/><circle class="wave" r="6"/>
+    <circle class="core" r="6"/>
+    <text x="0" y="30">二维码广场</text>
+  </g>
+  <g class="poi" data-poi="雁南园" transform="translate(494,552)">
+    <circle class="wave" r="6"/><circle class="wave" r="6"/>
+    <circle class="core" r="6"/>
+    <text x="0" y="30">雁南园</text>
+  </g>
+  <g class="poi" data-poi="甲子钟" transform="translate(905,402)">
+    <circle class="wave" r="6"/><circle class="wave" r="6"/>
+    <circle class="core" r="6"/>
+    <text x="26" y="4">甲子钟</text>
+  </g>
+
+  <g class="spot" data-id="library" transform="translate(565,150)">
+    <circle class="halo" r="24" fill="#4d94c4" opacity=".25"/>
+    <circle class="ring" r="24" stroke="#4d94c4"/>
+    <circle class="dot" r="5.5" fill="#bfe2f8" filter="url(#glow)"/>
+    <g class="eq" fill="#bfe2f8"><rect x="9" y="-4" width="2.4" height="8" rx="1"><animate attributeName="height" values="4;11;4" dur=".9s" repeatCount="indefinite"/><animate attributeName="y" values="-2;-5.5;-2" dur=".9s" repeatCount="indefinite"/></rect><rect x="14" y="-3" width="2.4" height="6" rx="1"><animate attributeName="height" values="8;4;8" dur=".7s" repeatCount="indefinite"/></rect></g>
+    <text class="label" x="0" y="-36">图书馆内</text>
+    <text class="sub" x="0" y="-20">安静 · 翻页</text>
+  </g>
+  <g class="spot" data-id="lake" transform="translate(950,580)">
+    <circle class="halo" r="24" fill="#4d94c4" opacity=".25"/>
+    <circle class="ring" r="24" stroke="#4d94c4"/>
+    <circle class="dot" r="5.5" fill="#bfe2f8" filter="url(#glow)"/>
+    <g class="eq" fill="#bfe2f8"><rect x="9" y="-4" width="2.4" height="8" rx="1"><animate attributeName="height" values="4;11;4" dur=".9s" repeatCount="indefinite"/><animate attributeName="y" values="-2;-5.5;-2" dur=".9s" repeatCount="indefinite"/></rect><rect x="14" y="-3" width="2.4" height="6" rx="1"><animate attributeName="height" values="8;4;8" dur=".7s" repeatCount="indefinite"/></rect></g>
+    <text class="label" x="0" y="46">湖边</text>
+    <text class="sub" x="0" y="62">鸟鸣 · 水声</text>
+  </g>
+  <g class="spot" data-id="classroom" transform="translate(755,250)">
+    <circle class="halo" r="24" fill="#4d94c4" opacity=".25"/>
+    <circle class="ring" r="24" stroke="#4d94c4"/>
+    <circle class="dot" r="5.5" fill="#bfe2f8" filter="url(#glow)"/>
+    <g class="eq" fill="#bfe2f8"><rect x="9" y="-4" width="2.4" height="8" rx="1"><animate attributeName="height" values="4;11;4" dur=".9s" repeatCount="indefinite"/><animate attributeName="y" values="-2;-5.5;-2" dur=".9s" repeatCount="indefinite"/></rect><rect x="14" y="-3" width="2.4" height="6" rx="1"><animate attributeName="height" values="8;4;8" dur=".7s" repeatCount="indefinite"/></rect></g>
+    <text class="label" x="0" y="-36">教室内</text>
+    <text class="sub" x="0" y="-20">雨打窗 · 静</text>
+  </g>
+  <g class="spot" data-id="playground" transform="translate(195,570)">
+    <circle class="halo" r="24" fill="#e8c98a" opacity=".25"/>
+    <circle class="ring" r="24" stroke="#e8c98a"/>
+    <circle class="dot" r="5.5" fill="#ffe9c4" filter="url(#glow)"/>
+    <g class="eq" fill="#ffe9c4"><rect x="9" y="-4" width="2.4" height="8" rx="1"><animate attributeName="height" values="4;11;4" dur=".9s" repeatCount="indefinite"/><animate attributeName="y" values="-2;-5.5;-2" dur=".9s" repeatCount="indefinite"/></rect><rect x="14" y="-3" width="2.4" height="6" rx="1"><animate attributeName="height" values="8;4;8" dur=".7s" repeatCount="indefinite"/></rect></g>
+    <text class="label" x="0" y="-34">操场</text>
+    <text class="sub" x="0" y="-18">人声 · 活力</text>
+  </g>
+  <g class="spot" data-id="sac" transform="translate(485,150)">
+    <circle class="halo" r="24" fill="#e8c98a" opacity=".25"/>
+    <circle class="ring" r="24" stroke="#e8c98a"/>
+    <circle class="dot" r="5.5" fill="#ffe9c4" filter="url(#glow)"/>
+    <g class="eq" fill="#ffe9c4"><rect x="9" y="-4" width="2.4" height="8" rx="1"><animate attributeName="height" values="4;11;4" dur=".9s" repeatCount="indefinite"/><animate attributeName="y" values="-2;-5.5;-2" dur=".9s" repeatCount="indefinite"/></rect><rect x="14" y="-3" width="2.4" height="6" rx="1"><animate attributeName="height" values="8;4;8" dur=".7s" repeatCount="indefinite"/></rect></g>
+    <text class="label" x="0" y="-52">学生活动中心</text>
+    <text class="sub" x="0" y="-36">喧闹 · 烟火气</text>
+  </g>
+</svg>
+</div>
+
+<div id="vignette"></div>
+
+<div id="card">
+  <button class="close" id="cardClose">✕</button>
+  <div class="tag" id="cTag">SOUND SPOT</div>
+  <h3 id="cTitle"></h3>
+  <div class="en" id="cEn"></div>
+  <p id="cDesc"></p>
+  <div class="bar"><i id="cBar"></i></div>
+  <div class="vol"><span id="volLabel">距离感应音量</span><span id="cVol">0%</span></div>
+</div>
+
+<footer>
+  <div id="status">等待启程 —</div>
+  <div class="license">演示音频 CC0 · Noisekun & Freesound · 校园实地录音替换中</div>
+</footer>
+
+<div id="toast"></div>
+
+<div id="clouds">
+  <div class="puff p3" style="width:60vw;height:34vh;left:-12vw;top:-6vh;animation-duration:11s"></div>
+  <div class="puff p2" style="width:48vw;height:26vh;right:-8vw;top:4vh;animation-duration:9s"></div>
+  <div class="puff"    style="width:42vw;height:22vh;left:6vw;top:22vh;animation-duration:13s"></div>
+  <div class="puff p2" style="width:54vw;height:30vh;right:2vw;bottom:10vh;animation-duration:10s"></div>
+  <div class="puff p3" style="width:50vw;height:28vh;left:-6vw;bottom:-4vh;animation-duration:12s"></div>
+  <div class="puff"    style="width:36vw;height:20vh;left:30vw;top:44vh;animation-duration:14s"></div>
+  <div class="puff p2" style="width:30vw;height:18vh;right:24vw;top:34vh;animation-duration:8s"></div>
+</div>
+
+<div id="rotate"><div class="phone"></div><p>请 横 屏 观 看</p><span>转动手机，进入声音地图</span></div>
+
+<script>
+/* 调试：手机端 JS 错误直接显示在屏幕上（正式版可移除） */
+addEventListener('error', e=>{
+  var t = document.getElementById('toast');
+  if(t){ t.innerHTML = '⚠ ' + (e.message||'脚本错误').slice(0,80); t.classList.add('show'); }
+});
+/* ================= 浮光粒子 ================= */
+const cv = document.getElementById('sky'), cx2d = cv.getContext('2d');
+let ps = [];
+function resize(){
+  cv.width = innerWidth; cv.height = innerHeight;
+  ps = Array.from({length:50},()=>({
+    x:Math.random()*cv.width, y:Math.random()*cv.height,
+    r:Math.random()*2.2+.6, vy:-(.08+Math.random()*.22), vx:(Math.random()-.5)*.12,
+    a:.08+Math.random()*.2
+  }));
+}
+resize(); addEventListener('resize',resize);
+(function tick(){
+  cx2d.clearRect(0,0,cv.width,cv.height);
+  for(const p of ps){
+    p.y += p.vy; p.x += p.vx;
+    if(p.y < -10){ p.y = cv.height+10; p.x = Math.random()*cv.width; }
+    cx2d.globalAlpha = p.a;
+    cx2d.fillStyle = '#7db8dd';
+    cx2d.beginPath(); cx2d.arc(p.x,p.y,p.r,0,7); cx2d.fill();
+  }
+  cx2d.globalAlpha = 1;
+  requestAnimationFrame(tick);
+})();
+
+/* ================= 地点数据 ================= */
+const SPOTS = {
+  library:{name:'图书馆内',en:'INSIDE THE LIBRARY',file:'audio/leaves.mp3',tag:'QUIET · FOCUS',
+    desc:'上圆下方的图书馆里，暖色的灯落在书页上，笔尖划过纸面，偶尔一声轻轻的合页。这里的声音都很小，却构成了整个校园里最专注的频率。'},
+  lake:{name:'湖边',en:'BESIDE THE LAKE',file:'audio/birds-tree.mp3',tag:'NATURE · DUCKS',
+    desc:'景观湖畔，柳条扫过水面，成群的鸭子贴着水面游过，偶尔一头扎进水里扑腾出一圈涟漪。傍晚的湖边是被风吹软的，光和声音都会变成金色。'},
+  classroom:{name:'教室内',en:'IN THE CLASSROOM',file:'audio/rain.mp3',tag:'RAINY · STUDY',
+    desc:'雨天自习的午后，雨点密密地敲在教学实验综合楼的窗上，教室里只剩翻书和笔的沙沙声。窗外的雨声越大，屋内反而越安静。'},
+  playground:{name:'操场',en:'THE PLAYGROUND',file:'audio/playground.mp3',vol:.55,tag:'ENERGY · CROWD',
+    desc:'傍晚的运动场永远热闹：跑步的脚步声、球撞篮板的闷响、夜跑人群的喘息。这里是校园心跳最响的地方。'},
+  sac:{name:'学生活动中心',en:'STUDENT CENTER',file:'audio/coffee.mp3',vol:.7,tag:'BUSTLE · LIFE',
+    desc:'推开门就是扑面而来的热闹劲儿——社团在排练，乐队在调音，有人在讨论比赛，走廊里满是脚步和笑闹声。青春的动静，是这里的底色。'}
+};
+
+/* ================= 音频引擎（WebAudio GainNode：iOS 上 <audio>.volume 无效，必须用增益节点） ================= */
+let isMobile = matchMedia('(pointer:coarse)').matches;
+const nodes = {};
+let audioOn = false, inited = false, actx = null;
+
+function initAudio(){
+  for(const id in SPOTS){
+    const el = new Audio(SPOTS[id].file);
+    el.loop = true; el.preload = 'auto';
+    nodes[id] = {el, base: SPOTS[id].vol || 1, target: 0, cur: 0, gain: null};
+  }
+  inited = true;
+}
+/* iOS/移动端必须在用户手势内解锁：创建 AudioContext 并把每路音频接到增益节点 */
+function unlockAudio(){
+  if(!inited) initAudio();
+  try{
+    if(!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if(actx.state === 'suspended') actx.resume();
+    for(const id in nodes){
+      const n = nodes[id];
+      if(!n.gain){
+        const src = actx.createMediaElementSource(n.el);
+        n.gain = actx.createGain();
+        n.gain.gain.value = 0;
+        src.connect(n.gain); n.gain.connect(actx.destination);
+      }
+      n.el.play().catch(()=>{});        // 解锁后常驻播放，音量全由 gain 控制
+    }
+  }catch(err){ /* 忽略，音量逻辑在 gain 缺失时退化为播放/暂停 */ }
+  audioOn = true;
+}
+function setGain(id, v){
+  const n = nodes[id];
+  if(!n) return;
+  v = Math.max(0, Math.min(1, v));
+  n.target = v;
+  if(v > .02 && n.el.paused) n.el.play().catch(()=>{});
+  document.querySelector('.spot[data-id="'+id+'"]').classList.toggle('playing', v > .02);
+}
+/* 音量平滑：所有音频保持播放状态，音量 0 = 听不见 */
+/* 高度因子：初始高度无声，越放大越响 */
+function heightGain(){
+  return Math.max(0, Math.min(1, (zoom - SOUND_Z) / (MAX_Z - SOUND_Z)));  // 全程随高度变化，最大缩放才最响
+}
+(function smooth(){
+  for(const id in nodes){
+    const n = nodes[id];
+    let t = n.target || 0;
+    if(mode !== 'map') t = 0;      // 标题态/转场中：强制静音
+    t *= (n.base || 1) * heightGain();   // 声点音量 × 高度因子
+    n.cur = n.cur + (t - n.cur)*.05;   // 更缓的淡入淡出，杜绝突跳
+    n.cur = Math.max(0, Math.min(1, n.cur));
+    if(n.gain){
+      n.gain.gain.setTargetAtTime(n.cur, actx.currentTime, .04);  // 增益节点平滑过渡
+    } else if(audioOn){
+      if(n.cur > .02){ if(n.el.paused) n.el.play().catch(()=>{}); }
+      else if(n.cur < .005 && !n.el.paused) n.el.pause();          // 无 WebAudio 时的退化路径
+    }
+  }
+  requestAnimationFrame(smooth);
+})();
+function muteAll(){ for(const id in nodes) setGain(id, 0); }
+
+/* ================= 交互 ================= */
+const spots = [...document.querySelectorAll('.spot')];
+const pois  = [...document.querySelectorAll('.poi')];
+const card = document.getElementById('card');
+const cBar = document.getElementById('cBar');
+const cVol = document.getElementById('cVol');
+const toast = document.getElementById('toast');
+const cloudsEl = document.getElementById('clouds');
+const rotateEl = document.getElementById('rotate');
+const gateEl = document.getElementById('gate');
+const status = document.getElementById('status');
+const svgEl = document.querySelector('#stage svg');
+let selected = null;
+
+/* 声点定位：预存相对 svg 的比例坐标（transform 无关），
+   实时用 svg 的当前矩形换算——避开 transform transition 造成的读数滞后 */
+function cacheSpotCenters(){
+  const r = svgEl.getBoundingClientRect();
+  if(!r.width) return;
+  for(const g of [...spots, ...pois]){
+    const b = g.getBoundingClientRect();
+    g._rel = [(b.left + b.width/2 - r.left)/r.width, (b.top + b.height/2 - r.top)/r.height];
+  }
+}
+function spotCenter(g){
+  if(!g._rel) cacheSpotCenters();
+  // 解析计算 svg 当前屏幕矩形（避免 transform transition 的读数滞后）：
+  // stage 固定居中，svg 盒中心 = 视口中心 + pan，尺寸 = 布局尺寸 × zoom
+  const w = svgEl.clientWidth * zoom, h = svgEl.clientHeight * zoom;
+  const left = innerWidth/2 + panX - w/2, top = innerHeight/2 + panY - h/2;
+  return [left + g._rel[0]*w, top + g._rel[1]*h];
+}
+addEventListener('resize', ()=>{ for(const g of [...spots,...pois]) g._rel = null; });
+
+/* ---------- 横屏提示 ---------- */
+function checkOrient(){
+  if(!isMobile) return;
+  rotateEl.classList.toggle('show', innerHeight > innerWidth);
+}
+addEventListener('resize', checkOrient);
+addEventListener('orientationchange', ()=>setTimeout(checkOrient,300));
+checkOrient();
+
+/* ---------- 连续缩放逻辑：缩放值驱动一切状态 ----------
+   zoom >= 1.00  地图态（由标题页放大越过 1.0 即进入）
+   zoom 0.92~1.0 标题页↔地图 之间：云层与标题连续渐变
+   zoom <= 0.92  标题态；同时地图静音
+---------------------------------------------------------*/
+const MAX_Z = 2.4, MIN_Z = .8, ENTER_Z = 1.0, HOME_Z = 1.2, DESCEND_Z = 1.12, SOUND_Z = 1.4;
+let zoom = .86, panX = 0, panY = 0;
+let mode = 'title';          // title | entering | map
+let scripted = false, cloudForce = 0, gateAlpha = 1, mapAlpha = 0;
+
+function clampPan(){
+  const half = svgEl.getBoundingClientRect().width/2;
+  const lim = Math.max(0, half*(zoom-1) + 80);
+  panX = Math.max(-lim, Math.min(lim, panX));
+  panY = Math.max(-lim, Math.min(lim, panY));
+}
+function applyTransform(){
+  clampPan();
+  svgEl.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')';
+  if(mode === 'title') mapAlpha = 0;               // 标题态地图绝不显露
+  svgEl.style.opacity = mapAlpha;
+  svgEl.style.visibility = mapAlpha > .01 ? 'visible' : 'hidden';
+  svgEl.style.setProperty('--z', zoom);
+  document.documentElement.style.setProperty('--cs', Math.max(.85, Math.min(1.18, zoom)));
+  const gather = mode === 'map'
+    ? Math.max(0, Math.min(1, (DESCEND_Z - zoom)/(DESCEND_Z - (MIN_Z + .02))))
+    : 0;
+  // 标题随云层聚拢提前淡入（zoom < 1.0 开始），不再等穿云结束
+  if(mode === 'map') gateAlpha = Math.max(0, Math.min(1, (.98 - zoom)/.12));
+  else if(mode !== 'arriving' && mode !== 'entering' && mode !== 'title') gateAlpha = 0;
+  const cop = Math.max(cloudForce, gather);
+  cloudsEl.style.opacity = cop;
+  cloudsEl.style.visibility = cop > .01 ? 'visible' : 'hidden';
+  cloudsEl.style.transform = 'scale(' + (1 + (1 - cop)*1.6) + ')';
+  gateEl.style.opacity = gateAlpha;
+  gateEl.style.visibility = gateAlpha > .01 ? 'visible' : 'hidden';
+  if(mode !== 'map') muteAll();
+}
+let returnGen = 0, arriveGen = 0;
+let lastZoomT = performance.now();
+function setZoom(z){
+  returnGen++;                       // 任何缩放输入立即打断自动回升
+  // 标题浮现途中允许随时放大返回地图：打断 arriving 动画即可继续操作
+  if(scripted && mode === 'arriving' && z > zoom){
+    arriveGen++; scripted = false; mode = 'map'; mapAlpha = 1;
+  }
+  if(scripted) return;
+  let target = Math.max(MIN_Z, Math.min(MAX_Z, z));
+  // 下降限速：进入云层区（<1.22）后按时间限速（每秒最多 0.3），穿云更连贯
+  if(mode === 'map' && target < zoom && zoom < 1.22){
+    const now = performance.now();
+    const dt = Math.min(200, now - (setZoom.lastT || now));
+    setZoom.lastT = now;
+    target = Math.max(target, zoom - dt * .0006);   // 每秒 0.6，穿云更利落
+  } else {
+    setZoom.lastT = performance.now();
+  }
+  zoom = target;
+  lastZoomT = performance.now();
+  if(mode === 'title' && zoom >= ENTER_Z) startEnter();
+  else if(mode === 'map' && zoom <= .84) arriveTitle();   // 最高高度：标题自动浮现
+  applyTransform();
+  if(mode === 'map') updateCenterSound();
+}
+function animate(dur, fn, cb){
+  const t0 = performance.now();
+  (function step(t){
+    const p = Math.min(1,(t-t0)/dur);
+    const e = p<.5 ? 2*p*p : 1-Math.pow(-2*p+2,2)/2;
+    fn(e, p);
+    if(p<1) requestAnimationFrame(step); else cb&&cb();
+  })(t0);
+}
+/* 进入：云聚拢盖住标题 → 停顿 → 放大 + 云层向四周散开 → 固定初始高度 */
+function startEnter(){
+  scripted = true; mode = 'entering';
+  unlockAudio();
+  status.textContent = '正 在 穿 越 云 层 —';
+  animate(600, e=>{
+    cloudForce = e;                                  // 云先漫上来
+    gateAlpha = 1 - Math.max(0, (e - .55)/.45);      // 后半段标题才淡出
+    applyTransform();
+  }, ()=>{
+    setTimeout(()=>{
+      const z0 = zoom;
+      animate(1100, e=>{
+        zoom = z0 + (HOME_Z - z0)*e;
+        cloudForce = Math.max(0, 1 - e*1.15);        // 云向四周散开
+        gateAlpha = 0;
+        mapAlpha = Math.max(0, (e - .3)/.7);         // 地图在云散开后浮现
+        applyTransform();
+      }, ()=>{
+        scripted = false; mode = 'map'; cloudForce = 0; mapAlpha = 1;
+        onEnterMap(); updateCenterSound();
+      });
+    }, 450);
+  });
+}
+/* 缩到最小（最高高度）：云已聚拢，标题快速浮现；全程仅 0.75s 且到达即可操作 */
+function arriveTitle(){
+  scripted = true; mode = 'arriving';
+  const gen = ++arriveGen;
+  const dead = ()=> gen !== arriveGen;   // 被用户放大操作打断
+  muteAll();
+  panX = panY = 0;
+  selected = null; card.classList.remove('show');
+  spots.forEach(s=>s.classList.remove('active'));
+  status.textContent = '等待启程 —';
+  document.getElementById('hint').textContent = isMobile ? '双指张开 · 滑入地图' : '滚轮放大 · 进入地图';
+  toast.classList.remove('show');
+  clearTimeout(idleTimer);
+  const z0 = zoom;
+  animate(350, e=>{
+    if(dead()) return;
+    zoom = z0 + (.86 - z0)*e;
+    mapAlpha = 1 - e;                 // 地图隐入云中
+    applyTransform();
+  }, ()=>{
+    if(dead()) return;
+    animate(450, e=>{
+      if(dead()) return;
+      gateAlpha = e;                  // 标题在云层之上浮现
+      applyTransform();
+    }, ()=>{
+      if(dead()) return;
+      scripted = false; mode = 'title'; mapAlpha = 0;
+      // 云层在标题浮现后缓缓消散（1.4s），不凭空消失
+      animate(1400, e=>{ if(!dead()) { cloudForce = 1 - e; applyTransform(); } });
+    });
+  });
+}
+/* 云层中（<1.12）停止 0.9 秒 → 平滑弹回初始高度；一旦操作立即打断 */
+setInterval(()=>{
+  if(mode === 'map' && zoom < DESCEND_Z && performance.now() - lastZoomT > 900){
+    const gen = ++returnGen;
+    const z0 = zoom;
+    const t0 = performance.now();
+    (function step(t){
+      if(gen !== returnGen) return;               // 被用户操作打断
+      const p = Math.min(1,(t-t0)/700);
+      const e = p<.5 ? 2*p*p : 1-Math.pow(-2*p+2,2)/2;
+      zoom = z0 + (HOME_Z - z0)*e;
+      applyTransform();
+      if(p<1) requestAnimationFrame(step); else lastZoomT = performance.now();
+    })(t0);
+  }
+}, 250);
+function onEnterMap(){
+  status.textContent = '初始高度尚远 · 继续放大贴近地面';
+  document.getElementById('hint').textContent = isMobile
+    ? '单指拖动 · 双指缩放 · 越放大声音越清晰'
+    : '滚轮缩放 · 左键拖动 · 越放大声音越清晰';
+  if(isMobile && document.documentElement.requestFullscreen){
+    document.documentElement.requestFullscreen().then(()=>{
+      if(screen.orientation && screen.orientation.lock)
+        screen.orientation.lock('landscape').catch(()=>{});
+    }).catch(()=>{});
+  }
+}
+
+/* ---------- 声音：只播离屏幕中心最近的一个 ---------- */
+function nearestSpotTo(px, py, list){
+  let best = null, bd = 1e9;
+  for(const g of list){
+    const [sx, sy] = spotCenter(g);
+    const d = Math.hypot(px-sx, py-sy);
+    if(d < bd){ bd = d; best = g; }
+  }
+  return [best, bd];
+}
+/* 收音圆：以声点为圆心、地图空间固定半径（约 170 单位），
+   屏幕上的半径随缩放同步放大——地理范围恒定，符合直觉 */
+function centerRadius(){
+  const k = svgEl.clientWidth / 1200;   // svg 布局宽度（不含 transform）→ 屏幕像素
+  return 140 * k * Math.max(1, zoom);   // 收音圆略小：位置变化更易分辨
+}
+function updateCenterSound(){
+  if(!audioOn || mode !== 'map') return;
+  if(zoom <= SOUND_Z){ muteAll(); return; }   // 无声高度带：一切静音
+  // 高度因子（heightGain）在平滑循环里连续控制音量，无硬阈值
+  const cxp = innerWidth/2, cyp = innerHeight/2;
+  const [sp, sd] = nearestSpotTo(cxp, cyp, spots);
+  for(const g of spots){
+    const id = g.dataset.id;
+    if(g === sp && sd < centerRadius()){
+      let v = 1 - sd/centerRadius();
+      v = Math.pow(v, 1.4);
+      setGain(id, v);                              // 无任何保底，音量 = 距离 × 高度
+    } else {
+      setGain(id, 0);                              // 其余一律归零，杜绝残留
+    }
+  }
+  if(selected){
+    const val = nodes[selected].cur;
+    cBar.style.width = Math.round(val*100)+'%'; cVol.textContent = Math.round(val*100)+'%';
+  }
+}
+addEventListener('resize', ()=>{ if(audioOn && mode==='map') updateCenterSound(); });
+
+/* ---------- 手势（统一指针事件，桌面/移动共用） ---------- */
+let idleTimer = null, toastTimer = null;
+let pointers = new Map();          // pointerId -> {x,y}
+let pinch0 = null, lastPt = null, dragging = false, dragMoved = false;
+
+function unlockOnce(){ unlockAudio(); }
+
+/* 统一用 pointerdown 解锁 + 判定拖拽/捏合 */
+addEventListener('pointerdown', e=>{
+  unlockOnce();
+  clearTimeout(idleTimer);
+  toast.classList.remove('show');
+  pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(pointers.size === 1){
+    lastPt = {x:e.clientX, y:e.clientY};
+    dragMoved = false;
+    dragging = (mode === 'map');
+  } else if(pointers.size === 2){
+    dragging = false; lastPt = null;
+    const p = [...pointers.values()];
+    pinch0 = Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y) / zoom;
+  }
+});
+
+addEventListener('pointermove', e=>{
+  if(!pointers.has(e.pointerId)) {
+    // 桌面鼠标悬停：高度因子 + 距离
+    if(e.pointerType === 'mouse' && audioOn && mode === 'map' && !dragging) hoverSound(e.clientX, e.clientY);
+    return;
+  }
+  pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+
+  if(pointers.size === 1 && mode === 'map' && lastPt){
+    const dx = e.clientX - lastPt.x, dy = e.clientY - lastPt.y;
+    if(Math.hypot(dx,dy) > 2) dragMoved = true;
+    if(dragging){
+      panX += dx; panY += dy;
+      lastPt = {x:e.clientX, y:e.clientY};
+      applyTransform();
+      updateCenterSound();
+    }
+  } else if(pointers.size === 2 && pinch0){
+    const p = [...pointers.values()];
+    const d = Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y);
+    setZoom(d / pinch0);
+  } else if(e.pointerType === 'mouse' && audioOn && mode === 'map' && !dragging){
+    hoverSound(e.clientX, e.clientY);
+  }
+});
+
+addEventListener('pointerup', e=>{
+  pointers.delete(e.pointerId);
+  if(pointers.size < 2) pinch0 = null;
+  if(pointers.size === 0){
+    dragging = false;
+    // 点击（未拖动）时命中检测 → 打开卡片（不依赖 click 事件）
+    if(mode === 'map' && !dragMoved) tapAt(e.clientX, e.clientY);
+    lastPt = null;
+    scheduleIntro();
+  } else if(pointers.size === 1){
+    const p = [...pointers.values()][0];
+    lastPt = {x:p.x, y:p.y};
+    dragging = (mode === 'map');
+  }
+});
+addEventListener('pointercancel', e=>{ pointers.delete(e.pointerId); dragging = false; });
+
+/* 桌面悬停发声：距离衰减 × 高度 */
+function hoverSound(mx, my){
+  const hg = heightGain();
+  const R = centerRadius();
+  for(const g of spots){
+    const id = g.dataset.id;
+    const [sx, sy] = spotCenter(g);
+    const d = Math.hypot(mx-sx, my-sy);
+    let v = d >= R ? 0 : Math.pow(1 - d/R, 1.4);
+    setGain(id, v * hg);
+    g.style.opacity = .6 + v*.4;
+  }
+  if(selected){
+    const val = Math.round(Math.min(1, (nodes[selected].cur))*100);
+    cBar.style.width = val+'%'; cVol.textContent = val+'%';
+  }
+}
+
+/* 点击命中检测 */
+function tapAt(x, y){
+  const el = document.elementFromPoint(x, y);
+  const spot = el && el.closest ? el.closest('.spot') : null;
+  if(spot) openSpot(spot);
+}
+function openSpot(g, silent){
+  const id = g.dataset.id, d = SPOTS[id];
+  spots.forEach(s=>s.classList.toggle('active', s===g));
+  selected = id;
+  document.getElementById('cTag').textContent = d.tag;
+  document.getElementById('cTitle').textContent = d.name;
+  document.getElementById('cEn').textContent = d.en;
+  document.getElementById('cDesc').textContent = d.desc;
+  document.getElementById('volLabel').textContent = '中心感应音量';
+  // 卡片靠左/靠右：声点在屏幕右半 → 卡片放左边，反之放右边，避免遮挡
+  const [sx] = spotCenter(g);
+  card.classList.toggle('left', sx > innerWidth/2);
+  card.classList.add('show');
+  status.textContent = '正在聆听 — ' + d.name;
+  if(mode === 'map') updateCenterSound();
+}
+
+/* 停留 2.2 秒：介绍中心最近地点 / 未收录提示 */
+function scheduleIntro(){
+  if(!audioOn || mode !== 'map') return;
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(()=>{
+    if(!audioOn || mode !== 'map') return;
+    const cxp = innerWidth/2, cyp = innerHeight/2;
+    const [sp, sd] = nearestSpotTo(cxp, cyp, spots);
+    const [pb, pd] = nearestSpotTo(cxp, cyp, pois);
+    const spScore = (sp && sd < centerRadius()*.85) ? sd/(centerRadius()*.85) : 9;
+    const ppScore = (pb && pd < centerRadius()*.7) ? pd/(centerRadius()*.7) : 9;
+    if(spScore < ppScore){ openSpot(sp); }
+    else if(pb && ppScore < 9){
+      toast.innerHTML = '「<b>'+pb.dataset.poi+'</b>」的声音还未收录 · 敬请期待';
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(()=>toast.classList.remove('show'), 3200);
+    }
+  }, 2200);
+}
+
+function closeCard(){
+  selected = null; card.classList.remove('show');
+  spots.forEach(s=>s.classList.remove('active'));
+  status.textContent = '初始高度尚远 · 继续放大贴近地面';
+}
+document.getElementById('cardClose').addEventListener('pointerdown', e=>{ e.stopPropagation(); closeCard(); });
+
+/* 桌面滚轮缩放 */
+addEventListener('wheel', e=>{
+  e.preventDefault();
+  setZoom(zoom * (e.deltaY>0 ? .93 : 1.07));
+}, {passive:false});
+
+/* 初始渲染（标题态，地图在云层后待命） */
+if(!isMobile) document.getElementById('gestHint').textContent = '滚轮放大 · 进入地图';
+applyTransform();
+</script>
+</body>
+</html>

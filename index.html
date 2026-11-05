@@ -476,12 +476,20 @@ let audioOn = false, inited = false, actx = null, gestureSeen = false;
 
 function initAudio(){
   for(const id in SPOTS){
-    const el = new Audio(SPOTS[id].file);
-    el.loop = true; el.preload = 'auto';
-    nodes[id] = {el, base: SPOTS[id].vol || 1, target: 0, cur: 0, gain: null};
+    const el = new Audio();
+    el.loop = true;
+    el.preload = 'auto';
+    el.setAttribute('playsinline', '');   // iOS 内联播放，不弹全屏播放器
+    el.setAttribute('webkit-playsinline', '');
+    el.src = SPOTS[id].file;
+    el.load();
+    nodes[id] = {el, base: SPOTS[id].vol || 1, target: 0, cur: 0, gain: null, ready: false};
+    el.addEventListener('canplaythrough', ()=>{ nodes[id].ready = true; }, {once:true});
+    el.addEventListener('playing', ()=>{ nodes[id].ready = true; }, {once:true});
   }
   inited = true;
 }
+/* 页面一加载就开始下载音频（不等用户触摸）—— 调用放在脚本末尾，避免提前访问未声明的变量 */
 /* iOS/移动端必须在用户手势内解锁：创建 AudioContext，并把每条音轨经 GainNode 接到 0 音量
    —— 此时音频已开始播放、只是听不见，之后无需再点任何地方即可发声 */
 function unlockAudio(){
@@ -937,8 +945,23 @@ addEventListener('wheel', e=>{
 if(!isMobile) document.getElementById('gestHint').textContent = '滚轮放大 · 进入地图';
 applyTransform();
 
+/* 所有变量已就绪：立刻预加载音频，把"首次出声"的等待压到最短 */
+initAudio();
+
 /* ---------- 诊断面板：地址后加 ?debug 打开（不显示时完全无影响） ---------- */
-if(location.search.indexOf('debug') > -1){
+let dbgOn = location.search.indexOf('debug') > -1;
+function showDbg(on){
+  dbgOn = on;
+  document.getElementById('dbg').style.display = on ? 'block' : 'none';
+}
+/* 连点三下左下角可切换诊断信息；也可用 ?debug 打开 */
+let _dbgToggle = 0;
+addEventListener('pointerdown', e=>{
+  if(e.clientX < 100 && e.clientY > innerHeight - 100){
+    if(++_dbgToggle >= 3){ _dbgToggle = 0; showDbg(!dbgOn); }
+  }
+});
+if(dbgOn){
   const dbg = document.getElementById('dbg');
   dbg.style.display = 'block';
   setInterval(()=>{

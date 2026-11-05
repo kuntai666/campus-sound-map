@@ -717,7 +717,7 @@ function onEnterMap(){
   status.textContent = '初始高度尚远 · 继续放大贴近地面';
   document.getElementById('hint').textContent = isMobile
     ? '单指拖动 · 双指缩放 · 越放大声音越清晰'
-    : '滚轮缩放 · 左键拖动 · 越放大声音越清晰';
+    : '滚轮缩放 · 左键拖动 · 目标移入屏幕中心即可聆听';
   if(isMobile && document.documentElement.requestFullscreen){
     document.documentElement.requestFullscreen().then(()=>{
       if(screen.orientation && screen.orientation.lock)
@@ -790,11 +790,7 @@ addEventListener('pointerdown', e=>{
 });
 
 addEventListener('pointermove', e=>{
-  if(!pointers.has(e.pointerId)) {
-    // 桌面鼠标悬停：高度因子 + 距离
-    if(e.pointerType === 'mouse' && audioOn && mode === 'map' && !dragging) hoverSound(e.clientX, e.clientY);
-    return;
-  }
+  if(!pointers.has(e.pointerId)) return;   // 未按下：不再按鼠标远近发声，统一由屏幕中心决定
   pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
 
   if(pointers.size === 1 && mode === 'map' && lastPt){
@@ -810,8 +806,6 @@ addEventListener('pointermove', e=>{
     const p = [...pointers.values()];
     const d = Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y);
     setZoom(d / pinch0);
-  } else if(e.pointerType === 'mouse' && audioOn && mode === 'map' && !dragging){
-    hoverSound(e.clientX, e.clientY);
   }
 });
 
@@ -831,24 +825,6 @@ addEventListener('pointerup', e=>{
   }
 });
 addEventListener('pointercancel', e=>{ pointers.delete(e.pointerId); dragging = false; });
-
-/* 桌面悬停发声：距离衰减 × 高度 */
-function hoverSound(mx, my){
-  const hg = heightGain();
-  const R = centerRadius();
-  for(const g of spots){
-    const id = g.dataset.id;
-    const [sx, sy] = spotCenter(g);
-    const d = Math.hypot(mx-sx, my-sy);
-    let v = d >= R ? 0 : Math.pow(1 - d/R, 1.4);
-    setGain(id, v * hg);
-    g.style.opacity = .6 + v*.4;
-  }
-  if(selected){
-    const val = Math.round(Math.min(1, (nodes[selected].cur))*100);
-    cBar.style.width = val+'%'; cVol.textContent = val+'%';
-  }
-}
 
 /* 点击命中检测 */
 function tapAt(x, y){

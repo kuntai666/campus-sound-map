@@ -129,6 +129,23 @@
     opacity:0;visibility:hidden;transition:.45s;pointer-events:none;white-space:nowrap;
   }
   #toast.show{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0)}
+
+  /* ---- 声音装载引导 ---- */
+  #audioWait{
+    position:fixed;z-index:45;left:50%;bottom:58px;transform:translateX(-50%) translateY(8px);
+    background:rgba(20,44,74,.9);color:#c3d9ec;backdrop-filter:blur(8px);
+    border:1px solid rgba(119,163,205,.4);border-radius:999px;padding:9px 20px;
+    font-size:12px;letter-spacing:.12em;box-shadow:0 10px 34px rgba(2,10,24,.5);
+    opacity:0;visibility:hidden;transition:.5s;pointer-events:none;white-space:nowrap;
+    display:flex;align-items:center;gap:9px;
+  }
+  #audioWait.show{opacity:1;visibility:visible;transform:translateX(-50%) translateY(0)}
+  #audioWait .spin{
+    width:11px;height:11px;border-radius:50%;flex:0 0 auto;
+    border:2px solid rgba(119,163,205,.35);border-top-color:var(--sky);
+    animation:waitSpin .8s linear infinite;
+  }
+  @keyframes waitSpin{to{transform:rotate(360deg)}}
   #toast b{color:var(--sky);font-weight:600}
 
   .poi{cursor:default}
@@ -405,6 +422,7 @@
   <div class="license">演示音频 CC0 · Noisekun & Freesound · 校园实地录音替换中</div>
 </footer>
 
+<div id="audioWait"><i class="spin"></i><span id="audioWaitText">声音装载中 · 马上就好</span></div>
 <div id="toast"></div>
 
 <div id="clouds">
@@ -941,6 +959,43 @@ applyTransform();
 
 /* 变量就绪后立刻预加载音频，缩短首次出声的等待 */
 initAudio();
+
+/* ---------- 声音装载引导：装载中 → 就绪操作引导 → 结束 ---------- */
+let audioWaitDone = false;
+let audioWaitStage = '';            // '' | 'loading' | 'tip'
+(function watchAudio(){
+  const el = document.getElementById('audioWait');
+  const tx = document.getElementById('audioWaitText');
+  let tipTimer = null;
+  setInterval(function(){
+    if(mode !== 'map' || !audioOn || audioWaitDone){
+      if(audioWaitStage){ audioWaitStage=''; el.classList.remove('show'); }
+      return;
+    }
+    const ns = Object.values(nodes);
+    const allPlaying = ns.length === 5 && ns.every(function(n){ return !n.el.paused && n.el.currentTime > .3; });
+    if(!allPlaying){
+      if(audioWaitStage !== 'loading'){
+        audioWaitStage = 'loading';
+        tx.textContent = '声音装载中 · 马上就好';
+        el.classList.add('show');
+      }
+      return;
+    }
+    // 全部就绪：切换到操作引导（3.5 秒后结束）
+    if(audioWaitStage !== 'tip'){
+      audioWaitStage = 'tip';
+      tx.innerHTML = '把地点移到<b style="color:#8fc4e8">屏幕中心</b>即可聆听';
+      el.classList.add('show');
+      clearTimeout(tipTimer);
+      tipTimer = setTimeout(function(){
+        audioWaitDone = true;
+        audioWaitStage = '';
+        el.classList.remove('show');
+      }, 3500);
+    }
+  }, 300);
+})();
 </script>
 </body>
 </html>

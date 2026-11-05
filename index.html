@@ -460,6 +460,15 @@ const SPOTS = {
     desc:'推开门就是扑面而来的热闹劲儿——社团在排练，乐队在调音，有人在讨论比赛，走廊里满是脚步和笑闹声。青春的动静，是这里的底色。'}
 };
 
+/* 全局错误捕获：脚本异常时在页面顶部提示，避免"静默无声"难以排查 */
+addEventListener('error', ev=>{
+  const t = document.getElementById('toast');
+  if(t && ev.message){
+    t.innerHTML = '脚本错误：' + String(ev.message).slice(0, 70);
+    t.classList.add('show');
+  }
+}, true);
+
 /* ================= 音频引擎（WebAudio GainNode：iOS 上 <audio>.volume 无效，必须用增益节点） ================= */
 let isMobile = matchMedia('(pointer:coarse)').matches;
 const nodes = {};
@@ -524,7 +533,7 @@ function heightGain(){
     n.cur = Math.max(0, Math.min(1, n.cur));
     if(n.gain){
       // 只在音量确有变化时写一次，避免每帧往时间线塞自动化事件（安卓长时间会堆积/卡顿）
-      if(Math.abs(n.cur - (n.written ?? -1)) > .004){
+      if(n.written === undefined || Math.abs(n.cur - n.written) > .004){
         n.written = n.cur;
         n.gain.gain.setTargetAtTime(n.cur, actx.currentTime, .035);
       }

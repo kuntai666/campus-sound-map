@@ -148,13 +148,12 @@
     transition:width .3s ease;
   }
   #loader .l-pct{font-size:10px;letter-spacing:.25em;color:#5f83a6;margin-top:2px}
-  #loader button{
-    margin-top:22px;padding:12px 44px;border-radius:999px;border:1px solid rgba(119,163,205,.5);
-    background:rgba(77,148,196,.18);color:#cfe2f2;font-size:14px;letter-spacing:.3em;text-indent:.3em;
-    cursor:pointer;transition:.4s;backdrop-filter:blur(6px);
+  #loader .l-hint{
+    margin-top:22px;font-size:12px;letter-spacing:.3em;text-indent:.3em;color:#5f83a6;
+    transition:color .5s;
   }
-  #loader button:not(:disabled){background:rgba(77,148,196,.32);color:#fff;border-color:#4d94c4;box-shadow:0 0 24px rgba(77,148,196,.35)}
-  #loader button:disabled{opacity:.45;cursor:default}
+  #loader.ready .l-hint{color:#b8d9ee;animation:lPulse 1.6s ease-in-out infinite}
+  @keyframes lPulse{0%,100%{opacity:.55}50%{opacity:1}}
   #toast b{color:var(--sky);font-weight:600}
 
   .poi{cursor:default}
@@ -435,8 +434,8 @@
   <div class="l-title">北邮沙河 · 声音地图</div>
   <div class="l-sub">YOU SHENG YOU SE · 校园声景</div>
   <div class="l-bar"><i id="loaderBar"></i></div>
-  <div class="l-pct" id="loaderPct">准备中 0%</div>
-  <button id="loaderBtn" disabled>资源装载中…</button>
+  <div class="l-pct" id="loaderPct">资源装载 0%</div>
+  <div class="l-hint" id="loaderHint">装 载 完 成 后 自 动 进 入</div>
 </div>
 <div id="toast"></div>
 
@@ -975,43 +974,41 @@ applyTransform();
 /* 变量就绪后立刻预加载音频，缩短首次出声的等待 */
 initAudio();
 
-/* ---------- 资源装载界面：音频全部就绪后才允许进入；点击进入按钮即完成音频解锁 ---------- */
+/* ---------- 资源装载界面：音频全部就绪后自动淡出；
+   用户双指张开进入地图的那次触摸即是音频解锁手势，无需额外按钮 ---------- */
 let audioLoaded = false;
 (function watchLoader(){
   const bar = document.getElementById('loaderBar');
   const pct = document.getElementById('loaderPct');
-  const btn = document.getElementById('loaderBtn');
+  const box = document.getElementById('loader');
+  const hint = document.getElementById('loaderHint');
   const t0 = performance.now();
   const tick = setInterval(function(){
     if(audioLoaded) return;
     const ns = Object.values(nodes);
-    if(!ns.length){ return; }
+    if(!ns.length) return;
     let sum = 0;
     for(let i=0;i<ns.length;i++){
-      const r = ns[i].el.readyState;            // 0~4
-      sum += Math.min(4, r) / 4;
+      sum += Math.min(4, ns[i].el.readyState) / 4;
     }
     let pctv = Math.round(sum / ns.length * 100);
-    // 兜底：12 秒后无论进度如何都放行（弱网不至于卡死在加载页）
     const elapsed = performance.now() - t0;
-    if(elapsed > 12000) pctv = Math.max(pctv, 100);
+    if(elapsed > 12000) pctv = 100;          // 弱网兜底：12 秒后放行
     bar.style.width = pctv + '%';
     pct.textContent = '资源装载 ' + pctv + '%';
     if(pctv >= 100){
       audioLoaded = true;
       clearInterval(tick);
-      btn.disabled = false;
-      btn.textContent = '进 入 · 开 始 聆 听';
+      box.classList.add('ready');
+      hint.textContent = '双 指 张 开 · 进 入 地 图';
+      setTimeout(function(){
+        box.classList.add('hide');
+        setTimeout(function(){ box.style.display = 'none'; }, 800);
+      }, 900);
     }
   }, 200);
 })();
-document.getElementById('loaderBtn').addEventListener('click', function(){
-  if(!audioLoaded) return;
-  unlockAudio();                                 // 用户手势内解锁，最可靠
-  const l = document.getElementById('loader');
-  l.classList.add('hide');
-  setTimeout(function(){ l.style.display = 'none'; }, 800);
-});
+/* 装载页兜底：若页面加载后音频一直未在手势中启动，首次触摸标题界面即解锁 */
 </script>
 </body>
 </html>

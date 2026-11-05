@@ -512,6 +512,14 @@ function initAudio(){
     el.src = SPOTS[id].file;
     el.load();                          // 立即开始下载，不等触摸
     nodes[id] = {el, base: SPOTS[id].vol || 1, target: 0, cur: 0, gain: null};
+    /* iOS 会中途打断音轨（切后台/省电/来电话）——被打断后自动恢复，不等下一次手势 */
+    el.addEventListener('pause', function(){
+      if(audioOn && nodes[id] && nodes[id].gain && nodes[id].el.paused){
+        setTimeout(function(){
+          if(audioOn && nodes[id].gain && nodes[id].el.paused) nodes[id].el.play().catch(function(){});
+        }, 80);
+      }
+    });
   }
   inited = true;
 }
@@ -554,13 +562,20 @@ function retryPaused(){
     if(n.el.paused) n.el.play().catch(()=>{});
   }
 }
+/* 声点元素缓存：避免交互中反复 querySelector */
+var _spotEls = {};
+function getSpotEl(id){
+  if(!_spotEls[id]) _spotEls[id] = document.querySelector('.spot[data-id="'+id+'"]');
+  return _spotEls[id];
+}
 function setGain(id, v){
   const n = nodes[id];
   if(!n) return;
   v = Math.max(0, Math.min(1, v));
   n.target = v;
   if(v > .02 && n.el.paused) n.el.play().catch(()=>{});
-  document.querySelector('.spot[data-id="'+id+'"]').classList.toggle('playing', v > .02);
+  var se = getSpotEl(id);
+  if(se) se.classList.toggle('playing', v > .02);
 }
 /* 音量平滑：所有音频保持播放状态，音量 0 = 听不见 */
 /* 高度因子：初始高度无声，越放大越响 */
@@ -573,11 +588,11 @@ function heightGain(){
     let t = n.target || 0;
     if(mode !== 'map') t = 0;      // 标题态/转场中：强制静音
     t *= (n.base || 1) * heightGain();   // 声点音量 × 高度因子
-    n.cur = n.cur + (t - n.cur)*.05;   // 更缓的淡入淡出，杜绝突跳
+    n.cur = n.cur + (t - n.cur)*.16;   // 较快逼近目标：0→最大约 0.35s，跟手但不突跳
     n.cur = Math.max(0, Math.min(MAX_GAIN, n.cur));   // 总音量上限，防止偏吵
     if(n.gain){
       // 只在音量确有变化时写一次：避免每秒 60 次自动化事件拖慢安卓
-      if(n.written === undefined || Math.abs(n.cur - n.written) > .006){
+      if(n.written === undefined || Math.abs(n.cur - n.written) > .008){
         n.written = n.cur;
         n.gain.gain.setTargetAtTime(n.cur, actx.currentTime, .04);
       }
@@ -662,7 +677,9 @@ function applyTransform(){
   if(mode === 'title') mapAlpha = 0;               // 标题态地图绝不显露
   svgEl.style.opacity = mapAlpha;
   svgEl.style.visibility = mapAlpha > .01 ? 'visible' : 'hidden';
-  svgEl.style.setProperty('--z', zoom);
+  /* --z 驱动所有标签字号（calc(x/var(--z))）：每帧改它会让十几个 SVG 文字重排版，
+     是缩放卡顿主因之一——手势进行中跳过，停手后在 markMoving 收尾时补写一次 */
+  if(!document.body.classList.contains('moving')) svgEl.style.setProperty('--z', zoom);
   document.documentElement.style.setProperty('--cs', Math.max(.85, Math.min(1.18, zoom)));
   const gather = mode === 'map'
     ? Math.max(0, Math.min(1, (DESCEND_Z - zoom)/(DESCEND_Z - (MIN_Z + .02))))
@@ -683,7 +700,10 @@ let movingTimer = null;
 function markMoving(){
   if(!document.body.classList.contains('moving')) document.body.classList.add('moving');
   clearTimeout(movingTimer);
-  movingTimer = setTimeout(()=>document.body.classList.remove('moving'), 180);
+  movingTimer = setTimeout(function(){
+    document.body.classList.remove('moving');
+    svgEl.style.setProperty('--z', zoom);   // 停手后补写最终字号
+  }, 180);
 }
 let returnGen = 0, arriveGen = 0;
 let lastZoomT = performance.now();

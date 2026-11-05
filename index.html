@@ -472,7 +472,8 @@ function initAudio(){
   }
   inited = true;
 }
-/* iOS/移动端必须在用户手势内解锁：创建 AudioContext 并把每路音频接到增益节点 */
+/* iOS/移动端必须在用户手势内解锁：创建 AudioContext，并把每条音轨经 GainNode 接到 0 音量
+   —— 此时音频已开始播放、只是听不见，之后无需再点任何地方即可发声 */
 function unlockAudio(){
   if(!inited) initAudio();
   try{
@@ -482,14 +483,22 @@ function unlockAudio(){
       const n = nodes[id];
       if(!n.gain){
         const src = actx.createMediaElementSource(n.el);
-        n.gain = actx.createGain();
-        n.gain.gain.value = 0;
-        src.connect(n.gain); n.gain.connect(actx.destination);
+        const g = actx.createGain();
+        g.gain.value = 0;               // 先静音，避免解锁瞬间五路齐响
+        src.connect(g); g.connect(actx.destination);
+        n.gain = g;
+        n.cur = 0;
       }
-      n.el.play().catch(()=>{});        // 解锁后常驻播放，音量全由 gain 控制
+      n.el.play().catch(()=>{});        // 常驻播放，音量全由 gain 控制
     }
   }catch(err){ /* 忽略，音量逻辑在 gain 缺失时退化为播放/暂停 */ }
   audioOn = true;
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState === 'visible' && actx){
+      if(actx.state === 'suspended') actx.resume();
+      for(const id in nodes) if(nodes[id].el.paused) nodes[id].el.play().catch(()=>{});
+    }
+  });
 }
 function setGain(id, v){
   const n = nodes[id];
@@ -521,7 +530,14 @@ function heightGain(){
   }
   requestAnimationFrame(smooth);
 })();
-function muteAll(){ for(const id in nodes) setGain(id, 0); }
+function muteAll(){
+  for(const id in nodes){
+    setGain(id, 0);
+    const n = nodes[id];
+    if(n.gain) n.gain.gain.setTargetAtTime(0, actx.currentTime, .03);  // 立即静音（转场/标题态）
+    n.cur = 0;
+  }
+}
 
 /* ================= 交互 ================= */
 const spots = [...document.querySelectorAll('.spot')];
@@ -770,7 +786,11 @@ let idleTimer = null, toastTimer = null;
 let pointers = new Map();          // pointerId -> {x,y}
 let pinch0 = null, lastPt = null, dragging = false, dragMoved = false;
 
-function unlockOnce(){ unlockAudio(); }
+function unlockOnce(){ if(!audioOn) unlockAudio(); }
+
+/* 首次触摸即解锁：桌面 / 移动端任何一次按下（含标题页双指缩放）就算用户手势 */
+['pointerdown','touchstart','mousedown','click','wheel'].forEach(ev=>
+  addEventListener(ev, unlockOnce, {passive:true}));
 
 /* 统一用 pointerdown 解锁 + 判定拖拽/捏合 */
 addEventListener('pointerdown', e=>{

@@ -472,7 +472,7 @@ addEventListener('error', ev=>{
 /* ================= 音频引擎（WebAudio GainNode：iOS 上 <audio>.volume 无效，必须用增益节点） ================= */
 let isMobile = matchMedia('(pointer:coarse)').matches;
 const nodes = {};
-let audioOn = false, inited = false, actx = null;
+let audioOn = false, inited = false, actx = null, gestureSeen = false;
 
 function initAudio(){
   for(const id in SPOTS){
@@ -485,27 +485,42 @@ function initAudio(){
 /* iOS/移动端必须在用户手势内解锁：创建 AudioContext，并把每条音轨经 GainNode 接到 0 音量
    —— 此时音频已开始播放、只是听不见，之后无需再点任何地方即可发声 */
 function unlockAudio(){
+  if(audioOn) return;                 // 幂等：只解锁一次
   if(!inited) initAudio();
   try{
     if(!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
-    if(actx.state === 'suspended') actx.resume();
+    // 先把每个元素经 GainNode 接入音频图（0 音量），再启动播放
     for(const id in nodes){
       const n = nodes[id];
       if(!n.gain){
         const src = actx.createMediaElementSource(n.el);
         const g = actx.createGain();
-        g.gain.value = 0;               // 先静音，避免解锁瞬间五路齐响
+        g.gain.value = 0;
         src.connect(g); g.connect(actx.destination);
         n.gain = g;
         n.cur = 0;
       }
-      n.el.play().catch(()=>{});        // 常驻播放，音量全由 gain 控制
     }
-  }catch(err){ /* 忽略，音量逻辑在 gain 缺失时退化为播放/暂停 */ }
+    const startAll = ()=>{
+      for(const id in nodes){
+        const n = nodes[id];
+        if(n.el.paused){
+          n.el.play().catch(e=>{ window.__audioErr = (window.__audioErr||'') + '|play('+id+'):' + (e&&e.name); });
+        }
+      }
+    };
+    // Safari：必须等 resume() 完成，音频图才真正激活，否则 play 出来的声音进不了输出
+    const p = (actx.state === 'suspended' || actx.state === 'interrupted') ? actx.resume() : Promise.resolve();
+    if(p && p.then){
+      p.then(()=>{ startAll(); }).catch(()=>{ startAll(); });
+    } else {
+      startAll();
+    }
+  }catch(err){ window.__audioErr = (window.__audioErr || '') + '|unlock:' + (err && err.message); }
   audioOn = true;
   document.addEventListener('visibilitychange', ()=>{
     if(document.visibilityState === 'visible' && actx){
-      if(actx.state === 'suspended') actx.resume();
+      if(actx.state !== 'running') actx.resume().catch(()=>{});
       for(const id in nodes) if(nodes[id].el.paused) nodes[id].el.play().catch(()=>{});
     }
   });
@@ -803,12 +818,13 @@ let pinch0 = null, lastPt = null, dragging = false, dragMoved = false;
 function unlockOnce(){ if(!audioOn) unlockAudio(); }
 
 /* 首次触摸即解锁：桌面 / 移动端任何一次按下（含标题页双指缩放）就算用户手势 */
+/* 手势标记：捕获阶段只做记号，不碰音频（避免抢占真正解锁时的用户手势） */
 ['pointerdown','touchstart','mousedown','click','wheel'].forEach(ev=>
-  addEventListener(ev, unlockOnce, {passive:true}));
+  addEventListener(ev, ()=>{ gestureSeen = true; }, {passive:true, capture:true}));
 
 /* 统一用 pointerdown 解锁 + 判定拖拽/捏合 */
 addEventListener('pointerdown', e=>{
-  unlockOnce();
+  unlockOnce();          // 同步解锁：resume + play 都在同一手势栈内完成
   clearTimeout(idleTimer);
   toast.classList.remove('show');
   pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
@@ -936,7 +952,9 @@ if(location.search.indexOf('debug') > -1){
       '\nzoom ' + zoom.toFixed(2) + '  hg ' + heightGain().toFixed(2) +
       '\nnear ' + (sp ? sp.dataset.id : '-') + ' d/R ' + (centerRadius() ? (sd/centerRadius()).toFixed(2) : '-') +
       '\n' + vol +
-      '\npaused ' + Object.values(nodes).map(n=>n.el.paused?1:0).join('');
+      '\npaused ' + Object.values(nodes).map(n=>n.el.paused?1:0).join('') +
+      '  t ' + Object.values(nodes).map(n=>n.el.currentTime.toFixed(0)).join(',') +
+      (window.__audioErr ? '\nERR ' + window.__audioErr.slice(0, 120) : '');
   }, 250);
 }
 </script>

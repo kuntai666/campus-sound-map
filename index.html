@@ -401,7 +401,6 @@
 </footer>
 
 <div id="toast"></div>
-<div id="dbg" style="position:fixed;left:8px;bottom:8px;z-index:999;font:11px/1.5 ui-monospace,monospace;color:#9fe8b5;background:rgba(0,0,0,.72);padding:8px 10px;border-radius:8px;display:none;white-space:pre;pointer-events:none"></div>
 
 <div id="clouds">
   <div class="puff p3" style="width:60vw;height:34vh;left:-12vw;top:-6vh;animation-duration:11s"></div>
@@ -460,78 +459,37 @@ const SPOTS = {
     desc:'推开门就是扑面而来的热闹劲儿——社团在排练，乐队在调音，有人在讨论比赛，走廊里满是脚步和笑闹声。青春的动静，是这里的底色。'}
 };
 
-/* 全局错误捕获：脚本异常时在页面顶部提示，避免"静默无声"难以排查 */
-addEventListener('error', ev=>{
-  const t = document.getElementById('toast');
-  if(t && ev.message){
-    t.innerHTML = '脚本错误：' + String(ev.message).slice(0, 70);
-    t.classList.add('show');
-  }
-}, true);
-
 /* ================= 音频引擎（WebAudio GainNode：iOS 上 <audio>.volume 无效，必须用增益节点） ================= */
 let isMobile = matchMedia('(pointer:coarse)').matches;
 const nodes = {};
-let audioOn = false, inited = false, actx = null, gestureSeen = false;
+let audioOn = false, inited = false, actx = null;
 
 function initAudio(){
   for(const id in SPOTS){
-    const el = new Audio();
-    el.loop = true;
-    el.preload = 'auto';
-    el.setAttribute('playsinline', '');   // iOS 内联播放，不弹全屏播放器
-    el.setAttribute('webkit-playsinline', '');
-    el.src = SPOTS[id].file;
-    el.load();
-    nodes[id] = {el, base: SPOTS[id].vol || 1, target: 0, cur: 0, gain: null, ready: false};
-    el.addEventListener('canplaythrough', ()=>{ nodes[id].ready = true; }, {once:true});
-    el.addEventListener('playing', ()=>{ nodes[id].ready = true; }, {once:true});
+    const el = new Audio(SPOTS[id].file);
+    el.loop = true; el.preload = 'auto';
+    nodes[id] = {el, base: SPOTS[id].vol || 1, target: 0, cur: 0, gain: null};
   }
   inited = true;
 }
-/* 页面一加载就开始下载音频（不等用户触摸）—— 调用放在脚本末尾，避免提前访问未声明的变量 */
-/* iOS/移动端必须在用户手势内解锁：创建 AudioContext，并把每条音轨经 GainNode 接到 0 音量
-   —— 此时音频已开始播放、只是听不见，之后无需再点任何地方即可发声 */
+/* iOS/移动端必须在用户手势内解锁：创建 AudioContext 并把每路音频接到增益节点 */
 function unlockAudio(){
-  if(audioOn) return;                 // 幂等：只解锁一次
   if(!inited) initAudio();
   try{
     if(!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
-    // 先把每个元素经 GainNode 接入音频图（0 音量），再启动播放
+    if(actx.state === 'suspended') actx.resume();
     for(const id in nodes){
       const n = nodes[id];
       if(!n.gain){
         const src = actx.createMediaElementSource(n.el);
-        const g = actx.createGain();
-        g.gain.value = 0;
-        src.connect(g); g.connect(actx.destination);
-        n.gain = g;
-        n.cur = 0;
+        n.gain = actx.createGain();
+        n.gain.gain.value = 0;
+        src.connect(n.gain); n.gain.connect(actx.destination);
       }
+      n.el.play().catch(()=>{});        // 解锁后常驻播放，音量全由 gain 控制
     }
-    const startAll = ()=>{
-      for(const id in nodes){
-        const n = nodes[id];
-        if(n.el.paused){
-          n.el.play().catch(e=>{ window.__audioErr = (window.__audioErr||'') + '|play('+id+'):' + (e&&e.name); });
-        }
-      }
-    };
-    // Safari：必须等 resume() 完成，音频图才真正激活，否则 play 出来的声音进不了输出
-    const p = (actx.state === 'suspended' || actx.state === 'interrupted') ? actx.resume() : Promise.resolve();
-    if(p && p.then){
-      p.then(()=>{ startAll(); }).catch(()=>{ startAll(); });
-    } else {
-      startAll();
-    }
-  }catch(err){ window.__audioErr = (window.__audioErr || '') + '|unlock:' + (err && err.message); }
+  }catch(err){ /* 忽略，音量逻辑在 gain 缺失时退化为播放/暂停 */ }
   audioOn = true;
-  document.addEventListener('visibilitychange', ()=>{
-    if(document.visibilityState === 'visible' && actx){
-      if(actx.state !== 'running') actx.resume().catch(()=>{});
-      for(const id in nodes) if(nodes[id].el.paused) nodes[id].el.play().catch(()=>{});
-    }
-  });
 }
 function setGain(id, v){
   const n = nodes[id];
@@ -555,11 +513,7 @@ function heightGain(){
     n.cur = n.cur + (t - n.cur)*.05;   // 更缓的淡入淡出，杜绝突跳
     n.cur = Math.max(0, Math.min(1, n.cur));
     if(n.gain){
-      // 只在音量确有变化时写一次，避免每帧往时间线塞自动化事件（安卓长时间会堆积/卡顿）
-      if(n.written === undefined || Math.abs(n.cur - n.written) > .004){
-        n.written = n.cur;
-        n.gain.gain.setTargetAtTime(n.cur, actx.currentTime, .035);
-      }
+      n.gain.gain.setTargetAtTime(n.cur, actx.currentTime, .04);  // 增益节点平滑过渡
     } else if(audioOn){
       if(n.cur > .02){ if(n.el.paused) n.el.play().catch(()=>{}); }
       else if(n.cur < .005 && !n.el.paused) n.el.pause();          // 无 WebAudio 时的退化路径
@@ -567,14 +521,7 @@ function heightGain(){
   }
   requestAnimationFrame(smooth);
 })();
-function muteAll(){
-  for(const id in nodes){
-    setGain(id, 0);
-    const n = nodes[id];
-    if(n.gain && n.written !== 0){ n.written = 0; n.gain.gain.setTargetAtTime(0, actx.currentTime, .03); }
-    n.cur = 0;
-  }
-}
+function muteAll(){ for(const id in nodes) setGain(id, 0); }
 
 /* ================= 交互 ================= */
 const spots = [...document.querySelectorAll('.spot')];
@@ -823,16 +770,11 @@ let idleTimer = null, toastTimer = null;
 let pointers = new Map();          // pointerId -> {x,y}
 let pinch0 = null, lastPt = null, dragging = false, dragMoved = false;
 
-function unlockOnce(){ if(!audioOn) unlockAudio(); }
-
-/* 首次触摸即解锁：桌面 / 移动端任何一次按下（含标题页双指缩放）就算用户手势 */
-/* 手势标记：捕获阶段只做记号，不碰音频（避免抢占真正解锁时的用户手势） */
-['pointerdown','touchstart','mousedown','click','wheel'].forEach(ev=>
-  addEventListener(ev, ()=>{ gestureSeen = true; }, {passive:true, capture:true}));
+function unlockOnce(){ unlockAudio(); }
 
 /* 统一用 pointerdown 解锁 + 判定拖拽/捏合 */
 addEventListener('pointerdown', e=>{
-  unlockOnce();          // 同步解锁：resume + play 都在同一手势栈内完成
+  unlockOnce();
   clearTimeout(idleTimer);
   toast.classList.remove('show');
   pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
@@ -944,42 +886,6 @@ addEventListener('wheel', e=>{
 /* 初始渲染（标题态，地图在云层后待命） */
 if(!isMobile) document.getElementById('gestHint').textContent = '滚轮放大 · 进入地图';
 applyTransform();
-
-/* 所有变量已就绪：立刻预加载音频，把"首次出声"的等待压到最短 */
-initAudio();
-
-/* ---------- 诊断面板：地址后加 ?debug 打开（不显示时完全无影响） ---------- */
-let dbgOn = location.search.indexOf('debug') > -1;
-function showDbg(on){
-  dbgOn = on;
-  document.getElementById('dbg').style.display = on ? 'block' : 'none';
-}
-/* 连点三下左下角可切换诊断信息；也可用 ?debug 打开 */
-let _dbgToggle = 0;
-addEventListener('pointerdown', e=>{
-  if(e.clientX < 100 && e.clientY > innerHeight - 100){
-    if(++_dbgToggle >= 3){ _dbgToggle = 0; showDbg(!dbgOn); }
-  }
-});
-if(dbgOn){
-  const dbg = document.getElementById('dbg');
-  dbg.style.display = 'block';
-  setInterval(()=>{
-    const vol = Object.entries(nodes).map(([k,n])=>{
-      const g = n.gain ? n.gain.gain.value.toFixed(2) : '--';
-      return k.slice(0,5) + ':' + g;
-    }).join(' ');
-    const [sp, sd] = nearestSpotTo(innerWidth/2, innerHeight/2, spots);
-    dbg.textContent =
-      'actx ' + (actx ? actx.state : 'null') + '  on:' + (audioOn?1:0) + '  ' + mode +
-      '\nzoom ' + zoom.toFixed(2) + '  hg ' + heightGain().toFixed(2) +
-      '\nnear ' + (sp ? sp.dataset.id : '-') + ' d/R ' + (centerRadius() ? (sd/centerRadius()).toFixed(2) : '-') +
-      '\n' + vol +
-      '\npaused ' + Object.values(nodes).map(n=>n.el.paused?1:0).join('') +
-      '  t ' + Object.values(nodes).map(n=>n.el.currentTime.toFixed(0)).join(',') +
-      (window.__audioErr ? '\nERR ' + window.__audioErr.slice(0, 120) : '');
-  }, 250);
-}
 </script>
 </body>
 </html>

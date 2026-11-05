@@ -73,6 +73,7 @@
   /* 缩放/拖动进行中：临时关闭实时模糊，避免手机每帧重算全屏滤镜导致卡顿 */
   body.moving #vignette{backdrop-filter:none;-webkit-backdrop-filter:none}
   body.moving #stage svg{transition:none}
+  body.moving #clouds .puff{filter:none}
 
   /* ---- 地图样式 ---- */
   .water{animation:shimmer 6s ease-in-out infinite}
@@ -487,19 +488,39 @@ function unlockAudio(){
   if(!inited) initAudio();
   try{
     if(!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
-    if(actx.state === 'suspended') actx.resume();
+    // 先接入音频图（0 音量），等 resume() 完成后再统一播放
+    // Safari 规则：resume 未完成时 play 出来的声音进不了输出，必须等它 resolve
     for(const id in nodes){
       const n = nodes[id];
       if(!n.gain){
         const src = actx.createMediaElementSource(n.el);
-        n.gain = actx.createGain();
-        n.gain.gain.value = 0;
-        src.connect(n.gain); n.gain.connect(actx.destination);
+        const g = actx.createGain();
+        g.gain.value = 0;
+        src.connect(g); g.connect(actx.destination);
+        n.gain = g;
+        n.cur = 0;
       }
-      n.el.play().catch(()=>{});        // 解锁后常驻播放，音量全由 gain 控制
     }
-  }catch(err){ /* 忽略，音量逻辑在 gain 缺失时退化为播放/暂停 */ }
+    const startAll = ()=>{
+      for(const id in nodes){
+        const n = nodes[id];
+        if(n.el.paused) n.el.play().catch(()=>{});
+      }
+    };
+    const pr = (actx.state === 'suspended' || actx.state === 'interrupted') ? actx.resume() : null;
+    if(pr && pr.then) pr.then(startAll).catch(startAll);
+    else startAll();
+  }catch(err){}
   audioOn = true;
+}
+/* 手势内补播：任何一次触摸时，把还没启动的音轨再试一次（iOS 可能第一次被拦） */
+function retryPaused(){
+  if(!audioOn || !actx) return;
+  if(actx.state !== 'running'){ actx.resume().catch(()=>{}); }
+  for(const id in nodes){
+    const n = nodes[id];
+    if(n.el.paused) n.el.play().catch(()=>{});
+  }
 }
 function setGain(id, v){
   const n = nodes[id];
@@ -804,6 +825,7 @@ function unlockOnce(){ unlockAudio(); }
 /* 统一用 pointerdown 解锁 + 判定拖拽/捏合 */
 addEventListener('pointerdown', e=>{
   unlockOnce();
+  retryPaused();          // 在同一手势内补启动尚未播放的音轨
   clearTimeout(idleTimer);
   toast.classList.remove('show');
   pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});

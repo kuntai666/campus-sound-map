@@ -68,7 +68,11 @@
     mask:radial-gradient(ellipse 64% 62% at 50% 50%, transparent 55%, #000 82%);
     backdrop-filter:blur(5px);
     -webkit-backdrop-filter:blur(5px);
+    will-change:auto;
   }
+  /* 缩放/拖动进行中：临时关闭实时模糊，避免手机每帧重算全屏滤镜导致卡顿 */
+  body.moving #vignette{backdrop-filter:none;-webkit-backdrop-filter:none}
+  body.moving #stage svg{transition:none}
 
   /* ---- 地图样式 ---- */
   .water{animation:shimmer 6s ease-in-out infinite}
@@ -463,11 +467,17 @@ const SPOTS = {
 let isMobile = matchMedia('(pointer:coarse)').matches;
 const nodes = {};
 let audioOn = false, inited = false, actx = null;
+const MAX_GAIN = .72;            // 全局音量上限（0~1），压低整体响度
 
 function initAudio(){
   for(const id in SPOTS){
-    const el = new Audio(SPOTS[id].file);
-    el.loop = true; el.preload = 'auto';
+    const el = new Audio();
+    el.loop = true;
+    el.preload = 'auto';
+    el.setAttribute('playsinline','');
+    el.setAttribute('webkit-playsinline','');
+    el.src = SPOTS[id].file;
+    el.load();                          // 立即开始下载，不等触摸
     nodes[id] = {el, base: SPOTS[id].vol || 1, target: 0, cur: 0, gain: null};
   }
   inited = true;
@@ -511,9 +521,13 @@ function heightGain(){
     if(mode !== 'map') t = 0;      // 标题态/转场中：强制静音
     t *= (n.base || 1) * heightGain();   // 声点音量 × 高度因子
     n.cur = n.cur + (t - n.cur)*.05;   // 更缓的淡入淡出，杜绝突跳
-    n.cur = Math.max(0, Math.min(1, n.cur));
+    n.cur = Math.max(0, Math.min(MAX_GAIN, n.cur));   // 总音量上限，防止偏吵
     if(n.gain){
-      n.gain.gain.setTargetAtTime(n.cur, actx.currentTime, .04);  // 增益节点平滑过渡
+      // 只在音量确有变化时写一次：避免每秒 60 次自动化事件拖慢安卓
+      if(n.written === undefined || Math.abs(n.cur - n.written) > .006){
+        n.written = n.cur;
+        n.gain.gain.setTargetAtTime(n.cur, actx.currentTime, .04);
+      }
     } else if(audioOn){
       if(n.cur > .02){ if(n.el.paused) n.el.play().catch(()=>{}); }
       else if(n.cur < .005 && !n.el.paused) n.el.pause();          // 无 WebAudio 时的退化路径
@@ -521,7 +535,14 @@ function heightGain(){
   }
   requestAnimationFrame(smooth);
 })();
-function muteAll(){ for(const id in nodes) setGain(id, 0); }
+function muteAll(){
+  for(const id in nodes){
+    setGain(id, 0);
+    const n = nodes[id];
+    n.cur = 0;
+    if(n.gain && n.written !== 0){ n.written = 0; n.gain.gain.setTargetAtTime(0, actx.currentTime, .03); }
+  }
+}
 
 /* ================= 交互 ================= */
 const spots = [...document.querySelectorAll('.spot')];
@@ -604,6 +625,13 @@ function applyTransform(){
   gateEl.style.visibility = gateAlpha > .01 ? 'visible' : 'hidden';
   if(mode !== 'map') muteAll();
 }
+/* 交互中临时降级视觉效果：停手 180ms 后恢复模糊 */
+let movingTimer = null;
+function markMoving(){
+  if(!document.body.classList.contains('moving')) document.body.classList.add('moving');
+  clearTimeout(movingTimer);
+  movingTimer = setTimeout(()=>document.body.classList.remove('moving'), 180);
+}
 let returnGen = 0, arriveGen = 0;
 let lastZoomT = performance.now();
 function setZoom(z){
@@ -625,6 +653,7 @@ function setZoom(z){
   }
   zoom = target;
   lastZoomT = performance.now();
+  markMoving();
   if(mode === 'title' && zoom >= ENTER_Z) startEnter();
   else if(mode === 'map' && zoom <= .84) arriveTitle();   // 最高高度：标题自动浮现
   applyTransform();
@@ -799,6 +828,7 @@ addEventListener('pointermove', e=>{
     if(dragging){
       panX += dx; panY += dy;
       lastPt = {x:e.clientX, y:e.clientY};
+      markMoving();
       applyTransform();
       updateCenterSound();
     }
@@ -886,6 +916,9 @@ addEventListener('wheel', e=>{
 /* 初始渲染（标题态，地图在云层后待命） */
 if(!isMobile) document.getElementById('gestHint').textContent = '滚轮放大 · 进入地图';
 applyTransform();
+
+/* 变量就绪后立刻预加载音频，缩短首次出声的等待 */
+initAudio();
 </script>
 </body>
 </html>
